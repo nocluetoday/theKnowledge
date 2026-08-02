@@ -51,11 +51,10 @@ repeat step 3 after each restart.
 Release builds of Firefox only install extensions that Mozilla has signed. Two
 ways around that:
 
-- **Sign it yourself.** Register at [addons.mozilla.org](https://addons.mozilla.org/developers/),
-  create API credentials, and submit the build for *self-distribution* signing.
-  You get back a signed `.xpi` you can install permanently, and it never appears
-  in the public add-on listing. The extension already declares a stable ID
-  (`med-knowledge-clipper@donneff.dev`), which signing requires.
+- **Sign it yourself** with `npm run sign` — the full workflow is in
+  [Releasing a signed build](#releasing-a-signed-build) below. You get back a
+  signed `.xpi` you can install permanently, and it never appears in the public
+  add-on listing.
 - **Use a Firefox build that allows unsigned extensions** — Developer Edition,
   Nightly, or ESR — where setting `xpinstall.signatures.required` to `false` in
   `about:config` permits installing the unsigned `.xpi` directly.
@@ -132,7 +131,7 @@ clipping to a single click.
 | **Ask where to save each note** | Opens the native Save dialog per note so you can save to any folder. Off by default |
 | **Downloads subfolder** | Folder under Downloads used when the dialog is off, and to pre-fill the filename when it is on |
 | **Characters per API call** | How much text goes in one request before the document is split (default 100,000) |
-| **Maximum output tokens** | Ceiling on the length of each response (default 16,000) |
+| **Maximum output tokens** | Ceiling on the length of each response (default 8,000) |
 | **Extraction prompt** | The full prompt, editable, with a **Restore default prompt** button |
 
 ---
@@ -261,7 +260,47 @@ npm test         # unit and integration tests
 npm run compile  # typecheck
 npm run build    # production build into .output/firefox-mv2/
 npm run zip      # packaged .zip
+npm run sign     # build + submit to Mozilla for self-distribution signing
 ```
+
+### Releasing a signed build
+
+One-time setup:
+
+1. Create a developer account at [addons.mozilla.org](https://addons.mozilla.org/developers/).
+2. Generate API credentials at
+   [Manage API Keys](https://addons.mozilla.org/developers/addon/api/key/) — a
+   JWT issuer (`user:…:…`) and a JWT secret.
+3. Export them in your shell profile (e.g. `~/.zshrc`), so `npm run sign` finds
+   them:
+
+   ```bash
+   export WEB_EXT_API_KEY="user:XXXXX:XXX"
+   export WEB_EXT_API_SECRET="your-jwt-secret"
+   ```
+
+Each release is then two commands:
+
+```bash
+npm version patch   # 0.1.0 → 0.1.1; commits and tags the bump
+npm run sign        # rebuilds, submits to AMO, waits for automated signing
+```
+
+The signed `.xpi` lands in `web-ext-artifacts/` (gitignored). Open it in
+Firefox to install permanently.
+
+Rules Mozilla enforces:
+
+- **A version number can only be signed once.** Bump `version` in
+  `package.json` (which `npm version` does for you) before every re-sign, or
+  AMO rejects the upload as a duplicate. `npm version` also refuses to run with
+  uncommitted changes — commit first.
+- **The extension ID must never change.** Signing is tied permanently to
+  `med-knowledge-clipper@donneff.dev` (set in `wxt.config.ts`) under the AMO
+  account that first signed it.
+- Signing uses the *unlisted* (self-distribution) channel: validation is
+  automatic, usually takes a couple of minutes, and nothing is published to the
+  public add-on gallery.
 
 Built with [WXT](https://wxt.dev) and TypeScript. Text extraction uses Mozilla's
 [Readability](https://github.com/mozilla/readability) for HTML and
