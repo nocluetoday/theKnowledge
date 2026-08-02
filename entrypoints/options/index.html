@@ -29,11 +29,22 @@
 
       <section>
         <h2>Saving</h2>
+        <label class="checkbox">
+          <input id="ask-where-to-save" type="checkbox" />
+          <span>Ask where to save each note</span>
+        </label>
+        <p class="note">
+          Opens your computer's normal Save dialog for every note, so you can put it in any folder —
+          an Obsidian vault, a network drive, anywhere. Firefox reopens the dialog at the last folder
+          you used. Leave this off to save straight to Downloads with no dialog.
+        </p>
+
         <label for="subfolder">Downloads subfolder</label>
         <input id="subfolder" type="text" spellcheck="false" />
         <p class="note">
-          Notes are saved to <code>Downloads/&lt;subfolder&gt;/</code>. Firefox extensions cannot
-          write outside the Downloads folder.
+          Used when the dialog is switched off, and to pre-fill the filename when it is on. Notes go
+          to <code>Downloads/&lt;subfolder&gt;/</code> — Firefox does not let extensions write outside
+          Downloads on their own, which is why saving elsewhere needs the dialog.
         </p>
       </section>
 

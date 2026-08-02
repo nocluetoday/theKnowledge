@@ -33,6 +33,16 @@ describe('loadSettings', () => {
     expect(settings.extractionPrompt).toContain('medical knowledge-extraction system');
   });
 
+  it('defaults to saving without a dialog', async () => {
+    expect((await loadSettings()).askWhereToSave).toBe(false);
+  });
+
+  it('keeps the save dialog enabled once turned on', async () => {
+    await browser.storage.local.set({ settings: { askWhereToSave: true } });
+
+    expect((await loadSettings()).askWhereToSave).toBe(true);
+  });
+
   it('fills unset fields from defaults rather than leaving them undefined', async () => {
     await browser.storage.local.set({ settings: { subfolder: 'Urology' } });
 

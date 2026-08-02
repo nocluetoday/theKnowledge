@@ -100,13 +100,22 @@ background and the note still saves.
 
 ### Where notes go
 
-Notes save to `Downloads/MedKnowledge/`, named `YYYY-MM-DD <page title>.md`.
-Clipping the same page twice never overwrites the first note; Firefox adds a
-numeric suffix.
+By default, notes save straight to `Downloads/MedKnowledge/` with no dialog,
+named `YYYY-MM-DD <page title>.md`. Clipping the same page twice never overwrites
+the first note; Firefox adds a numeric suffix.
 
-Firefox extensions are not permitted to write anywhere outside Downloads, so if
-you want notes in an Obsidian vault, change the subfolder in settings and point a
-sync tool at that folder, or move them in periodically.
+**To save somewhere else — an Obsidian vault, a network drive, anywhere —** turn
+on **Ask where to save each note** in settings. Every clip then opens your
+computer's normal Save dialog, on both macOS and Windows, pre-filled with the
+generated filename. Firefox reopens the dialog at the last folder you used, so
+after the first time your vault is already selected.
+
+Why a dialog rather than a "choose folder once" setting: Firefox does not permit
+extensions to write outside Downloads on their own — `downloads.download` rejects
+absolute paths — and Firefox does not implement the File System Access API that
+would let a chosen folder be remembered. The Save dialog is the only route to an
+arbitrary folder, and it has to appear each time. Leaving the setting off keeps
+clipping to a single click.
 
 ---
 
@@ -116,7 +125,8 @@ sync tool at that folder, or move them in periodically.
 | --- | --- |
 | **Provider** | Which service summaries are sent to |
 | **API key** and **Model** | Stored separately for each of the three providers |
-| **Downloads subfolder** | Folder under Downloads where notes are saved |
+| **Ask where to save each note** | Opens the native Save dialog per note so you can save to any folder. Off by default |
+| **Downloads subfolder** | Folder under Downloads used when the dialog is off, and to pre-fill the filename when it is on |
 | **Characters per API call** | How much text goes in one request before the document is split (default 100,000) |
 | **Maximum output tokens** | Ceiling on the length of each response (default 16,000) |
 | **Extraction prompt** | The full prompt, editable, with a **Restore default prompt** button |

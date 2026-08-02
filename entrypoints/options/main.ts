@@ -11,6 +11,7 @@ import { DEFAULT_EXTRACTION_PROMPT } from '../../src/prompts/default-extraction-
 const providerSelect = document.getElementById('provider') as HTMLSelectElement;
 const providerFields = document.getElementById('provider-fields') as HTMLDivElement;
 const subfolderInput = document.getElementById('subfolder') as HTMLInputElement;
+const askWhereToSaveInput = document.getElementById('ask-where-to-save') as HTMLInputElement;
 const chunkSizeInput = document.getElementById('chunk-size') as HTMLInputElement;
 const maxTokensInput = document.getElementById('max-tokens') as HTMLInputElement;
 const promptTextarea = document.getElementById('prompt') as HTMLTextAreaElement;
@@ -29,6 +30,7 @@ async function init(): Promise<void> {
 
   providerSelect.value = settings.provider;
   subfolderInput.value = settings.subfolder;
+  askWhereToSaveInput.checked = settings.askWhereToSave;
   chunkSizeInput.value = String(settings.chunkSize);
   maxTokensInput.value = String(settings.maxOutputTokens);
   promptTextarea.value = settings.extractionPrompt;
@@ -39,6 +41,8 @@ async function init(): Promise<void> {
     settings.provider = providerSelect.value as ProviderId;
     clearStatus();
   });
+  askWhereToSaveInput.addEventListener('change', clearStatus);
+  subfolderInput.addEventListener('input', clearStatus);
   restoreButton.addEventListener('click', () => {
     promptTextarea.value = DEFAULT_EXTRACTION_PROMPT;
     clearStatus();
@@ -95,6 +99,7 @@ async function persist(): Promise<void> {
 
   settings.provider = providerSelect.value as ProviderId;
   settings.subfolder = subfolderInput.value.trim() || DEFAULT_SETTINGS.subfolder;
+  settings.askWhereToSave = askWhereToSaveInput.checked;
   settings.chunkSize = clampNumber(chunkSizeInput.value, 10_000, 1_000_000, DEFAULT_SETTINGS.chunkSize);
   settings.maxOutputTokens = clampNumber(maxTokensInput.value, 1_000, 128_000, DEFAULT_SETTINGS.maxOutputTokens);
   settings.extractionPrompt = promptTextarea.value.trim() || DEFAULT_EXTRACTION_PROMPT;

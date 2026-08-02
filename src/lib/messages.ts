@@ -29,6 +29,17 @@ export interface ProgressUpdate {
 export interface DoneUpdate {
   type: 'done';
   filename: string;
+  /**
+   * True when the user picked the destination in the Save As dialog, so the
+   * final location is unknown to the extension and must not be reported as
+   * being under Downloads.
+   */
+  chosen: boolean;
+}
+
+/** The user dismissed the Save As dialog — expected, so not shown as an error. */
+export interface CancelledUpdate {
+  type: 'cancelled';
 }
 
 export interface ErrorUpdate {
@@ -36,7 +47,7 @@ export interface ErrorUpdate {
   message: string;
 }
 
-export type RunUpdate = ProgressUpdate | DoneUpdate | ErrorUpdate;
+export type RunUpdate = ProgressUpdate | DoneUpdate | CancelledUpdate | ErrorUpdate;
 
 /** Result returned by the content script's Readability pass. */
 export interface ArticleExtraction {

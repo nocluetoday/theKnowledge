@@ -61,7 +61,16 @@ function start(mode: ClipMode): void {
     if (update.type === 'progress') {
       setStatus(update.message);
     } else if (update.type === 'done') {
-      setStatus(`Saved to Downloads/${update.filename}`, 'success');
+      // With the Save As dialog the destination is the user's choice and is
+      // never reported back, so only name the file.
+      setStatus(
+        update.chosen ? `Saved ${update.filename}` : `Saved to Downloads/${update.filename}`,
+        'success',
+      );
+      setBusy(false);
+      port.disconnect();
+    } else if (update.type === 'cancelled') {
+      setStatus('Save cancelled.');
       setBusy(false);
       port.disconnect();
     } else if (update.type === 'error') {

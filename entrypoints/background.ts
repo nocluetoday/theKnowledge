@@ -29,12 +29,16 @@ export default defineBackground(() => {
       };
 
       try {
-        const filename = await run(message.mode, message.page, controller.signal, (text) =>
+        const { filename, chosen } = await run(message.mode, message.page, controller.signal, (text) =>
           send({ type: 'progress', message: text }),
         );
-        send({ type: 'done', filename });
+        send({ type: 'done', filename, chosen });
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return;
+        if (error instanceof SaveCancelled) {
+          send({ type: 'cancelled' });
+          return;
+        }
         send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
       }
     });
@@ -46,7 +50,7 @@ async function run(
   page: PageInfo,
   signal: AbortSignal,
   onProgress: (message: string) => void,
-): Promise<string> {
+): Promise<{ filename: string; chosen: boolean }> {
   const settings = await loadSettings();
 
   onProgress(page.kind === 'pdf' ? 'Reading the PDF…' : 'Reading the page…');
@@ -72,8 +76,17 @@ async function run(
       : buildSummaryNote(meta, result.sections);
   }
 
-  onProgress('Saving…');
-  return save(note, meta, settings.subfolder);
+  onProgress(settings.askWhereToSave ? 'Choose where to save…' : 'Saving…');
+  const filename = await save(note, meta, settings.subfolder, settings.askWhereToSave);
+  return { filename, chosen: settings.askWhereToSave };
+}
+
+/** Thrown when the user dismisses the Save As dialog — expected, not a failure. */
+export class SaveCancelled extends Error {
+  constructor() {
+    super('Save cancelled.');
+    this.name = 'SaveCancelled';
+  }
 }
 
 interface SourceContent {
@@ -123,8 +136,15 @@ function stripPdfExtension(title: string): string {
   return title.replace(/\.pdf$/i, '').trim();
 }
 
-async function save(note: string, meta: NoteMetadata, subfolder: string): Promise<string> {
+async function save(
+  note: string,
+  meta: NoteMetadata,
+  subfolder: string,
+  askWhereToSave: boolean,
+): Promise<string> {
   const filename = buildFilename(meta.title, meta.date);
+  // Always Downloads-relative: absolute paths are rejected outright. With
+  // `saveAs`, this only pre-fills the dialog — the user can then save anywhere.
   const path = buildDownloadPath(subfolder, filename);
 
   // Firefox's downloads API accepts blob: URLs from the background context.
@@ -136,12 +156,21 @@ async function save(note: string, meta: NoteMetadata, subfolder: string): Promis
       url,
       filename: path,
       conflictAction: 'uniquify',
-      saveAs: false,
+      saveAs: askWhereToSave,
     });
+  } catch (error) {
+    if (askWhereToSave && isUserCancellation(error)) throw new SaveCancelled();
+    throw error;
   } finally {
     // Revoking immediately can cancel an in-flight download; give it a moment.
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
-  return path;
+  return askWhereToSave ? filename : path;
+}
+
+/** Firefox reports a dismissed Save As dialog as a generic download error. */
+function isUserCancellation(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /cancell?ed|aborted/i.test(message);
 }

@@ -23,6 +23,16 @@ export interface Settings {
   provider: ProviderId;
   providers: Record<ProviderId, ProviderSettings>;
   subfolder: string;
+  /**
+   * Open the native Save As dialog for each note instead of saving silently.
+   *
+   * This is the only way to put a note outside Downloads: `downloads.download`
+   * rejects absolute paths, and Firefox does not implement the File System
+   * Access API, so a folder cannot be chosen once and remembered. The dialog is
+   * pre-filled with the generated path and Firefox reopens it at the last folder
+   * used, which gets close to a remembered destination.
+   */
+  askWhereToSave: boolean;
   chunkSize: number;
   maxOutputTokens: number;
   extractionPrompt: string;
@@ -36,6 +46,7 @@ export const DEFAULT_SETTINGS: Settings = {
     openrouter: { apiKey: '', model: DEFAULT_MODELS.openrouter },
   },
   subfolder: 'MedKnowledge',
+  askWhereToSave: false,
   chunkSize: 100_000,
   maxOutputTokens: 16_000,
   extractionPrompt: DEFAULT_EXTRACTION_PROMPT,
