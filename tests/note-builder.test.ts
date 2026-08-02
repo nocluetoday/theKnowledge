@@ -66,6 +66,14 @@ describe('buildSummaryNote', () => {
 });
 
 describe('buildClipNote', () => {
+  it('flattens newlines in the title so the frontmatter and heading stay on one line', () => {
+    // PDF metadata titles can contain line breaks; tab titles cannot.
+    const note = buildClipNote({ ...meta, type: 'clip', title: 'Line one\nLine two' }, 'Body.');
+
+    expect(note).toContain('title: "Line one Line two"');
+    expect(note).toContain('# Line one Line two');
+  });
+
   it('emits frontmatter, a heading, and the body', () => {
     const note = buildClipNote({ ...meta, type: 'clip' }, '## Findings\n\nText.');
 

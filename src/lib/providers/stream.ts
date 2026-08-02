@@ -10,8 +10,10 @@
 export type DeltaExtractor = (payload: unknown) => string | undefined;
 
 /**
- * Consume an SSE response, calling `onToken` with each text delta and resolving
- * with the concatenated text.
+ * Consume an SSE response, calling `onToken` with the accumulated text after
+ * each delta and resolving with the full text. Reporting cumulatively rather
+ * than per-delta means a consumer just replaces what it is showing — and a
+ * retried stream starts its report from scratch instead of doubling up.
  */
 export async function readSseStream(
   response: Response,
@@ -41,7 +43,7 @@ export async function readSseStream(
         const text = handleLine(line, extractDelta);
         if (text) {
           full += text;
-          onToken?.(text);
+          onToken?.(full);
         }
       }
     }
@@ -50,7 +52,7 @@ export async function readSseStream(
     const tail = handleLine(buffer, extractDelta);
     if (tail) {
       full += tail;
-      onToken?.(tail);
+      onToken?.(full);
     }
   } finally {
     reader.releaseLock();

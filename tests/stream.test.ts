@@ -31,7 +31,9 @@ const openaiDelta = (payload: unknown): string | undefined => {
 };
 
 describe('readSseStream — OpenAI/OpenRouter shape', () => {
-  it('concatenates deltas and reports each one', async () => {
+  it('reports the accumulated text so far with each delta', async () => {
+    // Cumulative rather than per-delta: a consumer that shows the text can then
+    // simply replace what it has, and a retried stream cannot double up.
     const response = sseResponse([
       'data: {"choices":[{"delta":{"content":"Partial "}}]}\n',
       'data: {"choices":[{"delta":{"content":"nephrectomy"}}]}\n',
@@ -42,7 +44,7 @@ describe('readSseStream — OpenAI/OpenRouter shape', () => {
     const text = await readSseStream(response, openaiDelta, (t) => tokens.push(t));
 
     expect(text).toBe('Partial nephrectomy');
-    expect(tokens).toEqual(['Partial ', 'nephrectomy']);
+    expect(tokens).toEqual(['Partial ', 'Partial nephrectomy']);
   });
 
   it('handles a line split across packet boundaries', async () => {
@@ -104,6 +106,7 @@ describe('readSseStream — Anthropic shape', () => {
 
     expect(text).toBe('T1a tumors');
     expect(onToken).toHaveBeenCalledTimes(2);
+    expect(onToken).toHaveBeenLastCalledWith('T1a tumors');
   });
 
   it('ignores thinking deltas, which are not part of the answer', async () => {

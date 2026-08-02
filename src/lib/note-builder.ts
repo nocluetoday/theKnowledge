@@ -17,10 +17,18 @@ function yamlString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+/**
+ * Collapse line breaks and other whitespace runs to single spaces. PDF metadata
+ * titles can contain newlines, which would break the frontmatter and heading.
+ */
+function flattenTitle(title: string): string {
+  return title.replace(/\s+/g, ' ').trim();
+}
+
 function buildFrontmatter(meta: NoteMetadata): string {
   const lines = [
     '---',
-    `title: ${yamlString(meta.title)}`,
+    `title: ${yamlString(flattenTitle(meta.title))}`,
     `source: ${yamlString(meta.source)}`,
     `clipped: ${formatDate(meta.date)}`,
     `type: ${meta.type}`,
@@ -34,7 +42,7 @@ function buildFrontmatter(meta: NoteMetadata): string {
 
 /** Build a clip-mode note: frontmatter plus the cleaned markdown body. */
 export function buildClipNote(meta: NoteMetadata, body: string): string {
-  return `${buildFrontmatter(meta)}\n# ${meta.title}\n\n[Source](${meta.source})\n\n${body.trim()}\n`;
+  return `${buildFrontmatter(meta)}\n# ${flattenTitle(meta.title)}\n\n[Source](${meta.source})\n\n${body.trim()}\n`;
 }
 
 /**
@@ -42,7 +50,7 @@ export function buildClipNote(meta: NoteMetadata, body: string): string {
  * records (B) and the copying-risk audit (G) collapsed at the bottom.
  */
 export function buildSummaryNote(meta: NoteMetadata, sections: ParsedSections): string {
-  const parts: string[] = [buildFrontmatter(meta), `# ${meta.title}\n`, `[Source](${meta.source})\n`];
+  const parts: string[] = [buildFrontmatter(meta), `# ${flattenTitle(meta.title)}\n`, `[Source](${meta.source})\n`];
 
   const section = (key: keyof typeof SECTION_TITLES, level = '##') => {
     const body = sections[key];
@@ -83,7 +91,7 @@ export function buildSummaryNote(meta: NoteMetadata, sections: ParsedSections): 
 export function buildRawFallbackNote(meta: NoteMetadata, raw: string): string {
   return [
     buildFrontmatter(meta),
-    `# ${meta.title}\n`,
+    `# ${flattenTitle(meta.title)}\n`,
     `[Source](${meta.source})\n`,
     '> The model output could not be split into the expected A–G sections, so it is',
     '> reproduced verbatim below.\n',

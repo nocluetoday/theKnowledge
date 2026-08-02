@@ -6,6 +6,7 @@ const statusEl = document.getElementById('status') as HTMLParagraphElement;
 const previewEl = document.getElementById('preview') as HTMLPreElement;
 const clipButton = document.getElementById('clip') as HTMLButtonElement;
 const summarizeButton = document.getElementById('summarize') as HTMLButtonElement;
+const cancelButton = document.getElementById('cancel') as HTMLButtonElement;
 const settingsButton = document.getElementById('settings') as HTMLButtonElement;
 
 /** How long to wait on the content-type sniff before assuming HTML. */
@@ -14,10 +15,16 @@ const SNIFF_TIMEOUT_MS = 1500;
 let page: PageInfo | undefined;
 /** Resolves once the PDF sniff settles; awaited only if the user clicks first. */
 let kindReady: Promise<void> = Promise.resolve();
+/** The port for the run in progress, so Cancel can reach the background. */
+let activePort: ReturnType<typeof browser.runtime.connect> | undefined;
 
 settingsButton.addEventListener('click', () => browser.runtime.openOptionsPage());
 clipButton.addEventListener('click', () => void start('clip'));
 summarizeButton.addEventListener('click', () => void start('summarize'));
+cancelButton.addEventListener('click', () => {
+  activePort?.postMessage({ type: 'cancel' });
+  setStatus('Cancelling…');
+});
 
 void init();
 
@@ -61,6 +68,9 @@ async function sniffPdf(url: string): Promise<boolean> {
   try {
     const response = await fetch(url, {
       method: 'HEAD',
+      // Same credentials the real PDF fetch uses, so a cookie-authenticated
+      // PDF is not misdetected as an HTML page.
+      credentials: 'include',
       signal: AbortSignal.timeout(SNIFF_TIMEOUT_MS),
     });
     return (response.headers.get('content-type') ?? '').toLowerCase().includes('application/pdf');
@@ -82,6 +92,15 @@ async function start(mode: ClipMode): Promise<void> {
   await kindReady;
 
   const port = browser.runtime.connect({ name: 'clipper' });
+  activePort = port;
+  let finished = false;
+
+  const finish = () => {
+    finished = true;
+    setBusy(false);
+    activePort = undefined;
+    port.disconnect();
+  };
 
   port.onMessage.addListener((raw: unknown) => {
     const update = raw as RunUpdate;
@@ -94,17 +113,23 @@ async function start(mode: ClipMode): Promise<void> {
       // never reported back, so only name the file.
       const where = update.chosen ? update.filename : `Downloads/${update.filename}`;
       setStatus(`Saved to ${where} in ${update.seconds}s`, 'success');
-      setBusy(false);
-      port.disconnect();
+      finish();
     } else if (update.type === 'cancelled') {
-      setStatus('Save cancelled.');
-      setBusy(false);
-      port.disconnect();
+      setStatus(update.message);
+      finish();
     } else if (update.type === 'error') {
       setStatus(update.message, 'error');
-      setBusy(false);
-      port.disconnect();
+      finish();
     }
+  });
+
+  // Without this, a background that dies mid-run would leave the popup stuck
+  // on a disabled "Starting…" state forever.
+  port.onDisconnect.addListener(() => {
+    if (finished) return;
+    setBusy(false);
+    activePort = undefined;
+    setStatus('Lost the connection to the extension. The run may still finish and save.', 'error');
   });
 
   port.postMessage({ type: 'start', mode, page });
@@ -120,6 +145,7 @@ function showPreview(text: string): void {
 function setBusy(busy: boolean): void {
   clipButton.disabled = busy;
   summarizeButton.disabled = busy;
+  cancelButton.hidden = !busy;
 }
 
 function setStatus(message: string, tone?: 'error' | 'success'): void {

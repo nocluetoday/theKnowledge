@@ -287,7 +287,8 @@ describe('summarize — synthesis mode (the fast default)', () => {
     );
 
     expect(requestedStream[0]).toBe(true);
-    expect(tokens).toEqual(['Partial ', 'nephrectomy ', 'is preferred.']);
+    // Each report carries the accumulated text so far, not the bare delta.
+    expect(tokens).toEqual(['Partial ', 'Partial nephrectomy ', 'Partial nephrectomy is preferred.']);
     expect(result.sections.F).toBe('Partial nephrectomy is preferred.');
   });
 });
@@ -352,6 +353,36 @@ describe('summarize — failures', () => {
 
     expect(calls).toBe(2);
     expect(result.sections.F).toContain('Partial nephrectomy');
+  });
+
+  it('stops launching chunk calls once one has failed permanently', async () => {
+    // Enough paragraphs for well over MAX_CONCURRENT_CHUNKS (4) chunks.
+    const longSource = Array.from({ length: 80 }, (_, i) => `Paragraph ${i} ${'x'.repeat(50)}`).join('\n\n');
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        if (++calls === 1) {
+          // A 400 is permanent: the run is doomed, so no further chunk should start.
+          return { ok: false, status: 400, text: async () => '{"error":{"message":"bad request"}}' };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ content: [{ type: 'text', text: CHUNK_RESPONSE(calls) }] }),
+        };
+      }),
+    );
+
+    await expect(summarize(longSource, settingsWith({ chunkSize: 500 }), () => {})).rejects.toThrow(/bad request/);
+
+    // The rejection reaches the caller while other chunk calls are still in
+    // flight — wait for those to settle before counting.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Only the calls already in flight when the failure hit; the queue never drains.
+    expect(calls).toBeLessThanOrEqual(4);
   });
 
   it('recovers when the first attempt fails and the retry succeeds', async () => {

@@ -61,6 +61,10 @@ describe('sanitizeSubfolder', () => {
   it('strips illegal characters within a segment', () => {
     expect(sanitizeSubfolder('Med:Knowledge')).toBe('MedKnowledge');
   });
+
+  it('keeps spaces and hyphens, which are legal in folder names', () => {
+    expect(sanitizeSubfolder('My Notes/Evidence-Based')).toBe('My Notes/Evidence-Based');
+  });
 });
 
 describe('buildDownloadPath', () => {

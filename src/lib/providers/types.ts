@@ -10,8 +10,9 @@ export interface CompletionRequest {
   /** OpenRouter only: prefer the fastest host for the model. */
   preferFastestProvider?: boolean;
   /**
-   * When supplied the response is streamed and this is called with each text
-   * delta. The full text is still returned when the stream completes.
+   * When supplied the response is streamed and this is called with the
+   * accumulated text so far after each delta. The full text is still returned
+   * when the stream completes.
    */
   onToken?: (text: string) => void;
   signal?: AbortSignal;
@@ -31,6 +32,17 @@ export class ProviderError extends Error {
     super(message);
     this.name = 'ProviderError';
   }
+}
+
+/**
+ * The model hit the output-token cap mid-response. Saving the truncated text
+ * would look like a complete note, so this is treated as a hard failure.
+ */
+export function outputLimitError(providerLabel: string): ProviderError {
+  return new ProviderError(
+    `${providerLabel} stopped at the output limit before the response was complete. ` +
+      `Raise "Max output tokens" in the extension's settings and try again.`,
+  );
 }
 
 /**

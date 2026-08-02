@@ -2,6 +2,7 @@ import { buildDownloadPath, buildFilename } from '../src/lib/filename';
 import { extractPdf } from '../src/lib/extract-pdf';
 import { htmlToMarkdown } from '../src/lib/markdown';
 import { buildClipNote, buildRawFallbackNote, buildSummaryNote, NoteMetadata } from '../src/lib/note-builder';
+import { createPreviewThrottle } from '../src/lib/preview-throttle';
 import { loadSettings } from '../src/lib/settings';
 import { summarize } from '../src/lib/summarize';
 import type { ArticleExtraction, ClipMode, PageInfo, RunUpdate } from '../src/lib/messages';
@@ -10,14 +11,19 @@ export default defineBackground(() => {
   browser.runtime.onConnect.addListener((port) => {
     if (port.name !== 'clipper') return;
 
-    // Deliberately not aborted when the port disconnects: a Firefox popup closes
-    // as soon as it loses focus, so cancelling on disconnect would kill a
-    // minutes-long summary the moment the user clicked the page behind it. The
-    // run finishes and saves; progress messages are dropped once nobody listens.
+    // Aborted only by an explicit cancel message — deliberately not when the
+    // port disconnects: a Firefox popup closes as soon as it loses focus, so
+    // cancelling on disconnect would kill a minutes-long summary the moment the
+    // user clicked the page behind it. The run finishes and saves; progress
+    // messages are dropped once nobody listens.
     const controller = new AbortController();
 
     port.onMessage.addListener(async (raw: unknown) => {
       const message = raw as { type?: string; mode: ClipMode; page: PageInfo };
+      if (message?.type === 'cancel') {
+        controller.abort();
+        return;
+      }
       if (message?.type !== 'start') return;
 
       const send = (update: RunUpdate) => {
@@ -32,15 +38,7 @@ export default defineBackground(() => {
 
       // Streamed text arrives token by token; repainting the popup that often
       // is wasted work, so coalesce to a few updates a second.
-      let streamed = '';
-      let lastSent = 0;
-      const onToken = (text: string) => {
-        streamed += text;
-        const now = Date.now();
-        if (now - lastSent < 250) return;
-        lastSent = now;
-        send({ type: 'partial', text: streamed });
-      };
+      const preview = createPreviewThrottle((text) => send({ type: 'partial', text }));
 
       try {
         const { filename, chosen } = await run(
@@ -48,8 +46,11 @@ export default defineBackground(() => {
           message.page,
           controller.signal,
           (text) => send({ type: 'progress', message: text }),
-          onToken,
+          (text) => preview.push(text),
         );
+        // Deliver the tail the throttle was still holding back, so the preview
+        // does not end mid-sentence.
+        preview.flush();
         send({
           type: 'done',
           filename,
@@ -57,9 +58,12 @@ export default defineBackground(() => {
           seconds: Math.round((Date.now() - startedAt) / 1000),
         });
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          send({ type: 'cancelled', message: 'Cancelled.' });
+          return;
+        }
         if (error instanceof SaveCancelled) {
-          send({ type: 'cancelled' });
+          send({ type: 'cancelled', message: 'Save cancelled.' });
           return;
         }
         send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
@@ -122,14 +126,7 @@ interface SourceContent {
 }
 
 async function readArticle(page: PageInfo): Promise<SourceContent> {
-  await browser.scripting.executeScript({
-    target: { tabId: page.tabId },
-    files: ['content-scripts/content.js'],
-  });
-
-  const article = (await browser.tabs.sendMessage(page.tabId, {
-    type: 'extract-article',
-  })) as ArticleExtraction | undefined;
+  const article = await requestArticle(page.tabId);
 
   if (!article || !article.text.trim()) {
     throw new Error('No readable content found on this page.');
@@ -140,6 +137,25 @@ async function readArticle(page: PageInfo): Promise<SourceContent> {
     markdown: htmlToMarkdown(article.html),
     text: article.text,
   };
+}
+
+/**
+ * Ask the content script for the article, injecting it first only when the page
+ * has no listener yet. Injecting unconditionally would register a duplicate
+ * listener — and run the extraction twice — on every repeat clip of the same
+ * page.
+ */
+async function requestArticle(tabId: number): Promise<ArticleExtraction | undefined> {
+  const request = { type: 'extract-article' };
+  try {
+    return (await browser.tabs.sendMessage(tabId, request)) as ArticleExtraction | undefined;
+  } catch {
+    await browser.scripting.executeScript({
+      target: { tabId },
+      files: ['content-scripts/content.js'],
+    });
+    return (await browser.tabs.sendMessage(tabId, request)) as ArticleExtraction | undefined;
+  }
 }
 
 async function readPdf(page: PageInfo, signal: AbortSignal): Promise<SourceContent> {

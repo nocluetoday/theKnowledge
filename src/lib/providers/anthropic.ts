@@ -1,6 +1,6 @@
 import type { Effort } from '../settings';
 import { readSseStream } from './stream';
-import { CompletionRequest, LlmProvider, ProviderError, errorFromResponse } from './types';
+import { CompletionRequest, LlmProvider, ProviderError, errorFromResponse, outputLimitError } from './types';
 
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const API_VERSION = '2023-06-01';
@@ -21,9 +21,34 @@ function toAnthropicEffort(effort: Effort): string {
   return effort === 'minimal' ? 'low' : effort;
 }
 
-/** Anthropic streams text as `content_block_delta` events carrying a `text_delta`. */
+/** A refusal or output-limit stop must fail the run, not save a partial note. */
+function checkStopReason(stopReason: string | undefined, category?: string): void {
+  if (stopReason === 'refusal') {
+    throw new ProviderError(
+      `Anthropic declined this request${category ? ` (${category})` : ''}. Try a different provider or model.`,
+    );
+  }
+  if (stopReason === 'max_tokens') throw outputLimitError('Anthropic');
+}
+
+/**
+ * Anthropic streams text as `content_block_delta` events carrying a
+ * `text_delta`. `error` events and bad stop reasons (delivered on
+ * `message_delta`) throw so a broken stream is never saved as a complete note.
+ */
 function extractDelta(payload: unknown): string | undefined {
-  const event = payload as { type?: string; delta?: { type?: string; text?: string } };
+  const event = payload as {
+    type?: string;
+    delta?: { type?: string; text?: string; stop_reason?: string };
+    error?: { message?: string };
+  };
+  if (event?.type === 'error') {
+    throw new ProviderError(event.error?.message ?? 'Anthropic reported an error mid-stream.');
+  }
+  if (event?.type === 'message_delta') {
+    checkStopReason(event.delta?.stop_reason);
+    return undefined;
+  }
   if (event?.type !== 'content_block_delta') return undefined;
   if (event.delta?.type !== 'text_delta') return undefined;
   return event.delta.text;
@@ -64,12 +89,7 @@ export const anthropicProvider: LlmProvider = {
 
     const data = (await response.json()) as AnthropicResponse;
 
-    if (data.stop_reason === 'refusal') {
-      const category = data.stop_details?.category;
-      throw new ProviderError(
-        `Anthropic declined this request${category ? ` (${category})` : ''}. Try a different provider or model.`,
-      );
-    }
+    checkStopReason(data.stop_reason, data.stop_details?.category ?? undefined);
 
     const text = (data.content ?? [])
       .filter((block) => block.type === 'text' && block.text)

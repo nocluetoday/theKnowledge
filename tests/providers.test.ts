@@ -19,6 +19,25 @@ function lastRequest(spy: ReturnType<typeof vi.fn>) {
   return { url: url as string, options: options as RequestInit, body: JSON.parse(options.body as string) };
 }
 
+/** Stub fetch with a streaming SSE response built from the given lines. */
+function mockSseFetch(pieces: string[]) {
+  const encoder = new TextEncoder();
+  const spy = vi.fn().mockImplementation(
+    async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (const piece of pieces) controller.enqueue(encoder.encode(piece));
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+  );
+  vi.stubGlobal('fetch', spy);
+  return spy;
+}
+
 const request = {
   apiKey: 'test-key',
   model: 'test-model',
@@ -73,6 +92,44 @@ describe('anthropicProvider', () => {
     await expect(anthropicProvider.complete(request)).rejects.toBeInstanceOf(ProviderError);
   });
 
+  it('rejects a response truncated at the output limit instead of saving it', async () => {
+    mockFetch({ content: [{ type: 'text', text: 'truncated mid-sent' }], stop_reason: 'max_tokens' });
+
+    await expect(anthropicProvider.complete(request)).rejects.toThrow(/output limit.*Max output tokens/s);
+  });
+
+  it('surfaces an error event delivered mid-stream instead of saving a partial note', async () => {
+    mockSseFetch([
+      'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial "}}\n',
+      'data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n',
+    ]);
+
+    await expect(anthropicProvider.complete({ ...request, onToken: () => {} })).rejects.toThrow(/Overloaded/);
+  });
+
+  it('rejects a streamed response that stopped at the output limit', async () => {
+    mockSseFetch([
+      'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial "}}\n',
+      'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens"}}\n',
+      'data: {"type":"message_stop"}\n',
+    ]);
+
+    await expect(anthropicProvider.complete({ ...request, onToken: () => {} })).rejects.toThrow(
+      /output limit.*Max output tokens/s,
+    );
+  });
+
+  it('reports a refusal delivered mid-stream as an actionable error', async () => {
+    mockSseFetch([
+      'data: {"type":"message_delta","delta":{"stop_reason":"refusal"}}\n',
+      'data: {"type":"message_stop"}\n',
+    ]);
+
+    await expect(anthropicProvider.complete({ ...request, onToken: () => {} })).rejects.toThrow(
+      /declined this request/,
+    );
+  });
+
   it('sends effort inside output_config', async () => {
     const spy = mockFetch({ content: [{ type: 'text', text: 'ok' }] });
     await anthropicProvider.complete({ ...request, effort: 'medium' });
@@ -107,6 +164,24 @@ describe('openaiProvider effort', () => {
 });
 
 describe('openaiProvider', () => {
+  it('rejects a response truncated at the output limit instead of saving it', async () => {
+    mockFetch({ choices: [{ message: { content: 'truncated mid-sent' }, finish_reason: 'length' }] });
+
+    await expect(openaiProvider.complete(request)).rejects.toThrow(/output limit.*Max output tokens/s);
+  });
+
+  it('rejects a streamed response that stopped at the output limit', async () => {
+    mockSseFetch([
+      'data: {"choices":[{"delta":{"content":"partial "}}]}\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n',
+      'data: [DONE]\n',
+    ]);
+
+    await expect(openaiProvider.complete({ ...request, onToken: () => {} })).rejects.toThrow(
+      /output limit.*Max output tokens/s,
+    );
+  });
+
   it('uses max_completion_tokens and a bearer token', async () => {
     const spy = mockFetch({ choices: [{ message: { content: 'ok' } }] });
     await openaiProvider.complete(request);

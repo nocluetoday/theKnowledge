@@ -15,11 +15,16 @@ export interface StartRequest {
   page: PageInfo;
 }
 
+/** The user clicked Cancel in the popup; the in-flight run should abort. */
+export interface CancelRequest {
+  type: 'cancel';
+}
+
 export interface DetectRequest {
   type: 'detect';
 }
 
-export type PopupRequest = StartRequest | DetectRequest;
+export type PopupRequest = StartRequest | CancelRequest | DetectRequest;
 
 export interface ProgressUpdate {
   type: 'progress';
@@ -45,9 +50,13 @@ export interface DoneUpdate {
   seconds: number;
 }
 
-/** The user dismissed the Save As dialog — expected, so not shown as an error. */
+/**
+ * The run stopped at the user's request — either the Cancel button or a
+ * dismissed Save As dialog. Expected, so not shown as an error.
+ */
 export interface CancelledUpdate {
   type: 'cancelled';
+  message: string;
 }
 
 export interface ErrorUpdate {

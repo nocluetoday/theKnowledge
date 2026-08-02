@@ -51,17 +51,23 @@ async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
   }
 }
 
-/** Run `worker` over every item, at most `limit` at a time, preserving order. */
+/**
+ * Run `worker` over every item, at most `limit` at a time, preserving order.
+ * Stops taking new items once `signal` aborts; items already in flight finish
+ * (or fail) on their own.
+ */
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
   worker: (item: T, index: number) => Promise<R>,
+  signal?: AbortSignal,
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
 
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     for (;;) {
+      if (signal?.aborted) return;
       const index = next++;
       if (index >= items.length) return;
       results[index] = await worker(items[index], index);
@@ -96,6 +102,13 @@ export async function summarize(
   }
 
   const provider = getProvider(settings.provider);
+
+  // Once any call fails for good, the whole run is doomed — stop the other
+  // chunk requests rather than letting them spend tokens on a result that will
+  // be thrown away.
+  const failFast = new AbortController();
+  const runSignal = signal ? AbortSignal.any([signal, failFast.signal]) : failFast.signal;
+
   const call = (prompt: string, stream = false) =>
     provider.complete({
       apiKey: providerSettings.apiKey.trim(),
@@ -107,7 +120,7 @@ export async function summarize(
       // Only the call that writes the synthesis is worth streaming; the
       // intermediate extraction passes produce nothing a reader wants to watch.
       onToken: stream ? onToken : undefined,
-      signal,
+      signal: runSignal,
     });
 
   const synthesisOnly = settings.detail === 'synthesis';
@@ -128,15 +141,25 @@ export async function summarize(
   onProgress(`Extracting facts from ${chunks.length} parts…`);
   let completed = 0;
 
-  const responses = await mapWithConcurrency(chunks, MAX_CONCURRENT_CHUNKS, async (chunk, index) => {
-    const prompt = synthesisOnly
-      ? buildChunkFactsPrompt(settings.extractionPrompt, chunk, index, chunks.length)
-      : buildChunkPrompt(settings.extractionPrompt, chunk, index, chunks.length);
+  const responses = await mapWithConcurrency(
+    chunks,
+    MAX_CONCURRENT_CHUNKS,
+    async (chunk, index) => {
+      const prompt = synthesisOnly
+        ? buildChunkFactsPrompt(settings.extractionPrompt, chunk, index, chunks.length)
+        : buildChunkPrompt(settings.extractionPrompt, chunk, index, chunks.length);
 
-    const response = await withRetry(() => call(prompt), `Part ${index + 1} of ${chunks.length}`);
-    onProgress(`Extracted ${++completed} of ${chunks.length} parts…`);
-    return response;
-  });
+      try {
+        const response = await withRetry(() => call(prompt), `Part ${index + 1} of ${chunks.length}`);
+        onProgress(`Extracted ${++completed} of ${chunks.length} parts…`);
+        return response;
+      } catch (error) {
+        failFast.abort();
+        throw error;
+      }
+    },
+    failFast.signal,
+  );
 
   onProgress('Writing the synthesis…');
 

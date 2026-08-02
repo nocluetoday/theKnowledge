@@ -1,6 +1,6 @@
 import type { Effort } from '../settings';
 import { readSseStream } from './stream';
-import { CompletionRequest, LlmProvider, ProviderError, errorFromResponse } from './types';
+import { CompletionRequest, LlmProvider, ProviderError, errorFromResponse, outputLimitError } from './types';
 
 interface OpenAiCompatConfig {
   id: string;
@@ -21,18 +21,25 @@ interface OpenAiCompatConfig {
 }
 
 interface ChatCompletionResponse {
-  choices?: Array<{ message?: { content?: string | null } }>;
+  choices?: Array<{ message?: { content?: string | null }; finish_reason?: string | null }>;
   error?: { message?: string };
 }
 
-/** OpenAI/OpenRouter stream text as `choices[0].delta.content`. */
-function extractDelta(payload: unknown): string | undefined {
-  const event = payload as {
-    choices?: Array<{ delta?: { content?: string | null } }>;
-    error?: { message?: string };
+/**
+ * OpenAI/OpenRouter stream text as `choices[0].delta.content`. Mid-stream
+ * errors and a `length` finish (the output-token cap) throw so a broken or
+ * truncated stream is never saved as a complete note.
+ */
+function makeExtractDelta(label: string) {
+  return (payload: unknown): string | undefined => {
+    const event = payload as {
+      choices?: Array<{ delta?: { content?: string | null }; finish_reason?: string | null }>;
+      error?: { message?: string };
+    };
+    if (event?.error?.message) throw new ProviderError(event.error.message);
+    if (event?.choices?.[0]?.finish_reason === 'length') throw outputLimitError(label);
+    return event?.choices?.[0]?.delta?.content ?? undefined;
   };
-  if (event?.error?.message) throw new ProviderError(event.error.message);
-  return event?.choices?.[0]?.delta?.content ?? undefined;
 }
 
 /** Build the provider-specific reasoning fields for a request body. */
@@ -44,6 +51,8 @@ function effortFields(config: OpenAiCompatConfig, effort: Effort): Record<string
 }
 
 function createProvider(config: OpenAiCompatConfig): LlmProvider {
+  const extractDelta = makeExtractDelta(config.label);
+
   return {
     id: config.id,
 
@@ -89,6 +98,7 @@ function createProvider(config: OpenAiCompatConfig): LlmProvider {
       const data = (await response.json()) as ChatCompletionResponse;
       // OpenRouter can return a 200 carrying an error body.
       if (data.error?.message) throw new ProviderError(`${config.label}: ${data.error.message}`);
+      if (data.choices?.[0]?.finish_reason === 'length') throw outputLimitError(config.label);
 
       const text = data.choices?.[0]?.message?.content ?? '';
       if (!text.trim()) throw new ProviderError(`${config.label} returned an empty response.`);
