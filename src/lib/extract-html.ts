@@ -8,7 +8,6 @@ import type { ArticleExtraction } from './messages';
  * the user's live page has to be left untouched.
  */
 export function extractArticleFrom(doc: Document, fallbackTitle = ''): ArticleExtraction {
-  const readerable = isProbablyReaderable(doc);
   let article: ReturnType<Readability['parse']> = null;
 
   try {
@@ -30,12 +29,16 @@ export function extractArticleFrom(doc: Document, fallbackTitle = ''): ArticleEx
   }
 
   // Readability declines on non-article pages (tables, apps, search results).
-  // Fall back to the body so the user still gets the visible content.
+  // Fall back to the body so the user still gets the visible content. The
+  // readerable check is only consulted here, so it stays off the success path
+  // where it would traverse the DOM for a result nobody reads.
   const body = doc.body;
   return {
     title: (fallbackTitle || doc.title || 'Untitled').trim(),
     html: body?.innerHTML ?? '',
     text: (body?.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim(),
-    excerpt: readerable ? undefined : 'Extracted from full page (no article detected).',
+    excerpt: isProbablyReaderable(doc)
+      ? undefined
+      : 'Extracted from full page (no article detected).',
   };
 }

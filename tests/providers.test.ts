@@ -19,7 +19,13 @@ function lastRequest(spy: ReturnType<typeof vi.fn>) {
   return { url: url as string, options: options as RequestInit, body: JSON.parse(options.body as string) };
 }
 
-const request = { apiKey: 'test-key', model: 'test-model', prompt: 'Extract facts.', maxTokens: 8000 };
+const request = {
+  apiKey: 'test-key',
+  model: 'test-model',
+  prompt: 'Extract facts.',
+  maxTokens: 8000,
+  effort: 'low' as const,
+};
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -66,6 +72,38 @@ describe('anthropicProvider', () => {
 
     await expect(anthropicProvider.complete(request)).rejects.toBeInstanceOf(ProviderError);
   });
+
+  it('sends effort inside output_config', async () => {
+    const spy = mockFetch({ content: [{ type: 'text', text: 'ok' }] });
+    await anthropicProvider.complete({ ...request, effort: 'medium' });
+
+    expect(lastRequest(spy).body.output_config).toEqual({ effort: 'medium' });
+  });
+
+  it('maps minimal to low, which Anthropic does not accept', async () => {
+    const spy = mockFetch({ content: [{ type: 'text', text: 'ok' }] });
+    await anthropicProvider.complete({ ...request, effort: 'minimal' });
+
+    expect(lastRequest(spy).body.output_config).toEqual({ effort: 'low' });
+  });
+});
+
+describe('openaiProvider effort', () => {
+  it('sends a bare reasoning_effort rather than an object', async () => {
+    const spy = mockFetch({ choices: [{ message: { content: 'ok' } }] });
+    await openaiProvider.complete({ ...request, effort: 'minimal' });
+
+    const { body } = lastRequest(spy);
+    expect(body.reasoning_effort).toBe('minimal');
+    expect(body.reasoning).toBeUndefined();
+  });
+
+  it('never asks for provider routing, which is OpenRouter-only', async () => {
+    const spy = mockFetch({ choices: [{ message: { content: 'ok' } }] });
+    await openaiProvider.complete({ ...request, preferFastestProvider: true });
+
+    expect(lastRequest(spy).body.provider).toBeUndefined();
+  });
 });
 
 describe('openaiProvider', () => {
@@ -90,6 +128,26 @@ describe('openrouterProvider', () => {
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect((options.headers as Record<string, string>)['X-Title']).toBe('Medical Knowledge Clipper');
     expect(body.max_tokens).toBe(8000);
+  });
+
+  it('sends effort as a reasoning object with the trace excluded', async () => {
+    const spy = mockFetch({ choices: [{ message: { content: 'ok' } }] });
+    await openrouterProvider.complete({ ...request, effort: 'minimal' });
+
+    // OpenRouter normalizes reasoning across every model it fronts, so the
+    // object form is what reaches GPT-, Claude-, and Gemini-family models alike.
+    expect(lastRequest(spy).body.reasoning).toEqual({ effort: 'minimal', exclude: true });
+  });
+
+  it('asks for the fastest host only when the setting is on', async () => {
+    const on = mockFetch({ choices: [{ message: { content: 'ok' } }] });
+    await openrouterProvider.complete({ ...request, preferFastestProvider: true });
+    expect(lastRequest(on).body.provider).toEqual({ sort: 'throughput' });
+
+    vi.unstubAllGlobals();
+    const off = mockFetch({ choices: [{ message: { content: 'ok' } }] });
+    await openrouterProvider.complete({ ...request, preferFastestProvider: false });
+    expect(lastRequest(off).body.provider).toBeUndefined();
   });
 
   it('treats an error body on a 200 response as a failure', async () => {

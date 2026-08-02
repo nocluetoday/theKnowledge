@@ -5,6 +5,9 @@ import { DEFAULT_SETTINGS, Settings } from '../src/lib/settings';
 function settingsWith(overrides: Partial<Settings> = {}): Settings {
   return {
     ...DEFAULT_SETTINGS,
+    // Most existing cases assert the full A–G pipeline; synthesis mode is the
+    // shipped default and is covered separately below.
+    detail: 'full',
     ...overrides,
     providers: {
       ...DEFAULT_SETTINGS.providers,
@@ -13,21 +16,33 @@ function settingsWith(overrides: Partial<Settings> = {}): Settings {
   };
 }
 
-/** Stub the Anthropic endpoint, returning each scripted reply in turn. */
-function stubReplies(replies: string[]) {
+/**
+ * Stub the Anthropic endpoint, returning each scripted reply in turn.
+ *
+ * `delayMs` holds each response open so concurrency can be observed: the tests
+ * track how many requests are in flight simultaneously.
+ */
+function stubReplies(replies: string[], delayMs = 0) {
   const prompts: string[] = [];
   let call = 0;
+  let inFlight = 0;
+  let peakInFlight = 0;
 
   vi.stubGlobal(
     'fetch',
     vi.fn(async (_url: string, options: RequestInit) => {
       prompts.push(JSON.parse(options.body as string).messages[0].content);
       const text = replies[Math.min(call++, replies.length - 1)];
+
+      peakInFlight = Math.max(peakInFlight, ++inFlight);
+      if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      inFlight--;
+
       return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text }] }) };
     }),
   );
 
-  return { prompts, callCount: () => call };
+  return { prompts, callCount: () => call, peakInFlight: () => peakInFlight };
 }
 
 const FULL_RESPONSE = [
@@ -161,8 +176,119 @@ describe('summarize — chunked', () => {
 
     await summarize(longSource, chunkedSettings, (message) => updates.push(message));
 
-    expect(updates.some((u) => /part 1 of \d+/.test(u))).toBe(true);
-    expect(updates.at(-1)).toMatch(/Merging/);
+    expect(updates.some((u) => /Extracting facts from \d+ parts/.test(u))).toBe(true);
+    expect(updates.some((u) => /Extracted \d+ of \d+ parts/.test(u))).toBe(true);
+    expect(updates.at(-1)).toMatch(/Writing the synthesis/);
+  });
+});
+
+describe('summarize — concurrency', () => {
+  const longSource = Array.from({ length: 40 }, (_, i) => `Paragraph ${i} ${'x'.repeat(50)}`).join('\n\n');
+
+  it('runs chunk calls concurrently rather than one after another', async () => {
+    const stub = stubReplies(
+      [CHUNK_RESPONSE(1), CHUNK_RESPONSE(2), CHUNK_RESPONSE(3), MERGE_RESPONSE],
+      20,
+    );
+
+    const result = await summarize(longSource, settingsWith({ chunkSize: 500 }), () => {});
+
+    expect(result.chunks).toBeGreaterThan(1);
+    // Sequential execution would never exceed one request in flight.
+    expect(stub.peakInFlight()).toBeGreaterThan(1);
+  });
+
+  it('keeps chunk results in document order despite finishing out of order', async () => {
+    const stub = stubReplies([CHUNK_RESPONSE(1), CHUNK_RESPONSE(2), CHUNK_RESPONSE(3), MERGE_RESPONSE]);
+
+    await summarize(longSource, settingsWith({ chunkSize: 500 }), () => {});
+    const mergePrompt = stub.prompts[stub.prompts.length - 1];
+
+    // Part 1's facts must precede part 2's in the merged payload.
+    expect(mergePrompt.indexOf('Fact from part 1.')).toBeLessThan(
+      mergePrompt.indexOf('Fact from part 2.'),
+    );
+  });
+});
+
+describe('summarize — synthesis mode (the fast default)', () => {
+  const synthesisSettings = settingsWith({ detail: 'synthesis' });
+
+  it('asks for the synthesis only and skips the JSON records', async () => {
+    const stub = stubReplies(['F. New clinical synthesis\nThe synthesis.']);
+
+    const result = await summarize('Short source.', synthesisSettings, () => {});
+
+    expect(stub.callCount()).toBe(1);
+    expect(stub.prompts[0]).toContain('Do not write out');
+    expect(stub.prompts[0]).toContain('F. New clinical synthesis');
+    expect(result.sections.B).toBeUndefined();
+    expect(result.sections.F).toBe('The synthesis.');
+  });
+
+  it('treats an unlabelled response as the synthesis rather than a parse failure', async () => {
+    // Asked for one section, models often just write it without the heading.
+    stubReplies(['Partial nephrectomy is preferred for small renal masses.']);
+
+    const result = await summarize('Short source.', synthesisSettings, () => {});
+
+    expect(result.raw).toBeUndefined();
+    expect(result.sections.F).toBe('Partial nephrectomy is preferred for small renal masses.');
+  });
+
+  it('collects compact facts per chunk, then merges them into a synthesis', async () => {
+    const longSource = Array.from({ length: 40 }, (_, i) => `Paragraph ${i} ${'x'.repeat(50)}`).join('\n\n');
+    const stub = stubReplies([
+      '- [fact] Part one fact.',
+      '- [fact] Part two fact.',
+      '- [fact] Part three fact.',
+      'F. New clinical synthesis\nMerged synthesis.',
+    ]);
+
+    const result = await summarize(longSource, settingsWith({ detail: 'synthesis', chunkSize: 500 }), () => {});
+    const mergePrompt = stub.prompts[stub.prompts.length - 1];
+
+    expect(stub.prompts[0]).toContain('do not emit JSON');
+    expect(mergePrompt).toContain('EXTRACTED FACTS');
+    expect(mergePrompt).toContain('Part one fact.');
+    expect(result.sections.F).toBe('Merged synthesis.');
+    expect(result.sections.B).toBeUndefined();
+  });
+
+  it('streams the synthesis so text reaches the caller as it arrives', async () => {
+    // Serve a real SSE body so the whole streaming path runs end to end.
+    const encoder = new TextEncoder();
+    const requestedStream: boolean[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, options: RequestInit) => {
+        requestedStream.push(JSON.parse(options.body as string).stream === true);
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              for (const piece of ['Partial ', 'nephrectomy ', 'is preferred.']) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"${piece}"}}\n`,
+                  ),
+                );
+              }
+              controller.close();
+            },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const tokens: string[] = [];
+    const result = await summarize('Short source.', synthesisSettings, () => {}, undefined, (t) =>
+      tokens.push(t),
+    );
+
+    expect(requestedStream[0]).toBe(true);
+    expect(tokens).toEqual(['Partial ', 'nephrectomy ', 'is preferred.']);
+    expect(result.sections.F).toBe('Partial nephrectomy is preferred.');
   });
 });
 
@@ -186,6 +312,46 @@ describe('summarize — failures', () => {
 
     await expect(summarize('text', settingsWith(), () => {})).rejects.toThrow(/failed after a retry/);
     expect(calls).toBe(2);
+  });
+
+  it('fails immediately on a bad key instead of waiting out a pointless retry', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls++;
+        return {
+          ok: false,
+          status: 401,
+          text: async () => JSON.stringify({ error: { message: 'invalid x-api-key' } }),
+        };
+      }),
+    );
+
+    const started = Date.now();
+    await expect(summarize('text', settingsWith(), () => {})).rejects.toThrow(/invalid x-api-key/);
+
+    expect(calls).toBe(1);
+    // A 4xx will never succeed on a second attempt, so no 2s backoff is spent.
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('still retries a rate limit, which is transient', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        if (++calls === 1) {
+          return { ok: false, status: 429, text: async () => '{"error":{"message":"slow down"}}' };
+        }
+        return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text: FULL_RESPONSE }] }) };
+      }),
+    );
+
+    const result = await summarize('text', settingsWith(), () => {});
+
+    expect(calls).toBe(2);
+    expect(result.sections.F).toContain('Partial nephrectomy');
   });
 
   it('recovers when the first attempt fails and the retry succeeds', async () => {

@@ -1,5 +1,7 @@
 import {
   DEFAULT_SETTINGS,
+  DetailLevel,
+  Effort,
   PROVIDER_LABELS,
   ProviderId,
   Settings,
@@ -12,6 +14,9 @@ const providerSelect = document.getElementById('provider') as HTMLSelectElement;
 const providerFields = document.getElementById('provider-fields') as HTMLDivElement;
 const subfolderInput = document.getElementById('subfolder') as HTMLInputElement;
 const askWhereToSaveInput = document.getElementById('ask-where-to-save') as HTMLInputElement;
+const detailSelect = document.getElementById('detail') as HTMLSelectElement;
+const effortSelect = document.getElementById('effort') as HTMLSelectElement;
+const preferFastestInput = document.getElementById('prefer-fastest') as HTMLInputElement;
 const chunkSizeInput = document.getElementById('chunk-size') as HTMLInputElement;
 const maxTokensInput = document.getElementById('max-tokens') as HTMLInputElement;
 const promptTextarea = document.getElementById('prompt') as HTMLTextAreaElement;
@@ -31,6 +36,9 @@ async function init(): Promise<void> {
   providerSelect.value = settings.provider;
   subfolderInput.value = settings.subfolder;
   askWhereToSaveInput.checked = settings.askWhereToSave;
+  detailSelect.value = settings.detail;
+  effortSelect.value = settings.effort;
+  preferFastestInput.checked = settings.preferFastestProvider;
   chunkSizeInput.value = String(settings.chunkSize);
   maxTokensInput.value = String(settings.maxOutputTokens);
   promptTextarea.value = settings.extractionPrompt;
@@ -42,6 +50,9 @@ async function init(): Promise<void> {
     clearStatus();
   });
   askWhereToSaveInput.addEventListener('change', clearStatus);
+  detailSelect.addEventListener('change', clearStatus);
+  effortSelect.addEventListener('change', clearStatus);
+  preferFastestInput.addEventListener('change', clearStatus);
   subfolderInput.addEventListener('input', clearStatus);
   restoreButton.addEventListener('click', () => {
     promptTextarea.value = DEFAULT_EXTRACTION_PROMPT;
@@ -100,6 +111,9 @@ async function persist(): Promise<void> {
   settings.provider = providerSelect.value as ProviderId;
   settings.subfolder = subfolderInput.value.trim() || DEFAULT_SETTINGS.subfolder;
   settings.askWhereToSave = askWhereToSaveInput.checked;
+  settings.detail = detailSelect.value as DetailLevel;
+  settings.effort = effortSelect.value as Effort;
+  settings.preferFastestProvider = preferFastestInput.checked;
   settings.chunkSize = clampNumber(chunkSizeInput.value, 10_000, 1_000_000, DEFAULT_SETTINGS.chunkSize);
   settings.maxOutputTokens = clampNumber(maxTokensInput.value, 1_000, 128_000, DEFAULT_SETTINGS.maxOutputTokens);
   settings.extractionPrompt = promptTextarea.value.trim() || DEFAULT_EXTRACTION_PROMPT;

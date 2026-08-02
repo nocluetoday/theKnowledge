@@ -91,9 +91,10 @@ Open the article or PDF, click the extension, and choose a button:
 | **Clip full text** | The article verbatim as clean markdown | Free |
 | **Summarize** | A structured synthesis with the facts extracted and audited | One or more API calls |
 
-Progress appears in the popup (`Reading the page…`, `Summarizing…`, `Saving…`).
-Long documents report which part they are on. When it finishes, the popup shows
-where the file landed.
+Progress appears in the popup, and the synthesis streams in as it is written so
+you can read along rather than watch a spinner. Long documents report how many
+parts they are working through. When it finishes, the popup shows where the file
+landed and how long it took.
 
 You can close the popup while a summary is running — the work continues in the
 background and the note still saves.
@@ -125,6 +126,9 @@ clipping to a single click.
 | --- | --- |
 | **Provider** | Which service summaries are sent to |
 | **API key** and **Model** | Stored separately for each of the three providers |
+| **Detail level** | *Synthesis only* (default, fastest) writes just the clinical synthesis. *Full* also writes the JSON records, fact set, conflicts, verification queue, and audit |
+| **Reasoning effort** | How much the model thinks before answering — Minimal to High, default Low |
+| **Prefer the fastest provider** | OpenRouter only: route to whichever host is currently serving your model fastest |
 | **Ask where to save each note** | Opens the native Save dialog per note so you can save to any folder. Off by default |
 | **Downloads subfolder** | Folder under Downloads used when the dialog is off, and to pre-fill the filename when it is on |
 | **Characters per API call** | How much text goes in one request before the document is split (default 100,000) |
@@ -174,12 +178,34 @@ each claim, consolidate duplicates and conflicts, and only then write a synthesi
 *from the extracted records* — deliberately not from the source's prose,
 organization, or examples.
 
+### If summarizing feels slow
+
+Nearly all the wait is the model generating text, so the levers are in the
+**Speed** section of settings:
+
+1. **Detail level → Synthesis only** (the default). Full mode also writes a
+   ~20-field JSON record for every claim in the document. Those records are the
+   bulk of the generated text and sit collapsed in the note, so Full can easily
+   take several times longer for output most people never open.
+2. **Reasoning effort → Minimal or Low.** On OpenRouter this is a *share of the
+   output token budget* — roughly 80% of tokens at High versus 10% at Minimal —
+   so it moves the wait directly.
+3. **Prefer the fastest provider** (OpenRouter). Different hosts serve the same
+   model at very different speeds.
+4. **Maximum output tokens.** Lower is faster, and on OpenRouter it also shrinks
+   the reasoning budget, since effort is a fraction of this number.
+
+Long documents already run their parts in parallel, so adding pages costs far
+less than proportionally.
+
 ### Long documents
 
 Anything longer than the configured chunk size is split on page and paragraph
-boundaries. Each part is processed into atomic records, then a final call merges
-all the records and writes one synthesis over the combined set. The synthesis
-therefore reflects the whole document, not just its first section.
+boundaries. Each part is extracted **in parallel** (up to four at a time), then a
+final call merges the results and writes one synthesis over the combined set. The
+synthesis therefore reflects the whole document, not just its first section, and
+a ten-part PDF costs roughly the slowest part plus the merge rather than the sum
+of all ten.
 
 This is automatic and produces a single note either way. When it happens, the
 frontmatter records a `chunks:` count, and the popup reports progress per part.

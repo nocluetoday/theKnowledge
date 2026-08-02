@@ -28,11 +28,34 @@ export default defineBackground(() => {
         }
       };
 
+      const startedAt = Date.now();
+
+      // Streamed text arrives token by token; repainting the popup that often
+      // is wasted work, so coalesce to a few updates a second.
+      let streamed = '';
+      let lastSent = 0;
+      const onToken = (text: string) => {
+        streamed += text;
+        const now = Date.now();
+        if (now - lastSent < 250) return;
+        lastSent = now;
+        send({ type: 'partial', text: streamed });
+      };
+
       try {
-        const { filename, chosen } = await run(message.mode, message.page, controller.signal, (text) =>
-          send({ type: 'progress', message: text }),
+        const { filename, chosen } = await run(
+          message.mode,
+          message.page,
+          controller.signal,
+          (text) => send({ type: 'progress', message: text }),
+          onToken,
         );
-        send({ type: 'done', filename, chosen });
+        send({
+          type: 'done',
+          filename,
+          chosen,
+          seconds: Math.round((Date.now() - startedAt) / 1000),
+        });
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         if (error instanceof SaveCancelled) {
@@ -50,6 +73,7 @@ async function run(
   page: PageInfo,
   signal: AbortSignal,
   onProgress: (message: string) => void,
+  onToken?: (text: string) => void,
 ): Promise<{ filename: string; chosen: boolean }> {
   const settings = await loadSettings();
 
@@ -67,7 +91,7 @@ async function run(
   if (mode === 'clip') {
     note = buildClipNote(meta, source.markdown);
   } else {
-    const result = await summarize(source.text, settings, onProgress, signal);
+    const result = await summarize(source.text, settings, onProgress, signal, onToken);
     meta.provider = settings.provider;
     meta.model = settings.providers[settings.provider].model;
     meta.chunks = result.chunks;

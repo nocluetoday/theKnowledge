@@ -1,3 +1,5 @@
+import type { Effort } from '../settings';
+import { readSseStream } from './stream';
 import { CompletionRequest, LlmProvider, ProviderError, errorFromResponse } from './types';
 
 interface OpenAiCompatConfig {
@@ -9,6 +11,12 @@ interface OpenAiCompatConfig {
    * the original `max_tokens` field.
    */
   tokenField: 'max_tokens' | 'max_completion_tokens';
+  /**
+   * How this service spells the reasoning budget. OpenRouter normalizes it into
+   * a `reasoning` object across every model it fronts; OpenAI takes a bare
+   * `reasoning_effort`.
+   */
+  effortStyle: 'openrouter' | 'openai';
   extraHeaders?: Record<string, string>;
 }
 
@@ -17,11 +25,41 @@ interface ChatCompletionResponse {
   error?: { message?: string };
 }
 
+/** OpenAI/OpenRouter stream text as `choices[0].delta.content`. */
+function extractDelta(payload: unknown): string | undefined {
+  const event = payload as {
+    choices?: Array<{ delta?: { content?: string | null } }>;
+    error?: { message?: string };
+  };
+  if (event?.error?.message) throw new ProviderError(event.error.message);
+  return event?.choices?.[0]?.delta?.content ?? undefined;
+}
+
+/** Build the provider-specific reasoning fields for a request body. */
+function effortFields(config: OpenAiCompatConfig, effort: Effort): Record<string, unknown> {
+  if (config.effortStyle === 'openai') return { reasoning_effort: effort };
+  // `exclude` keeps the reasoning trace out of the response — we never show it,
+  // and shipping it back only costs time.
+  return { reasoning: { effort, exclude: true } };
+}
+
 function createProvider(config: OpenAiCompatConfig): LlmProvider {
   return {
     id: config.id,
 
-    async complete({ apiKey, model, prompt, maxTokens, signal }: CompletionRequest): Promise<string> {
+    async complete({
+      apiKey,
+      model,
+      prompt,
+      maxTokens,
+      effort,
+      preferFastestProvider,
+      onToken,
+      signal,
+    }: CompletionRequest): Promise<string> {
+      const stream = Boolean(onToken);
+      const routeForSpeed = config.effortStyle === 'openrouter' && preferFastestProvider;
+
       const response = await fetch(config.endpoint, {
         method: 'POST',
         headers: {
@@ -33,11 +71,20 @@ function createProvider(config: OpenAiCompatConfig): LlmProvider {
           model,
           messages: [{ role: 'user', content: prompt }],
           [config.tokenField]: maxTokens,
+          ...effortFields(config, effort),
+          ...(routeForSpeed ? { provider: { sort: 'throughput' } } : {}),
+          ...(stream ? { stream: true } : {}),
         }),
         signal,
       });
 
       if (!response.ok) throw await errorFromResponse(response, config.label);
+
+      if (stream) {
+        const text = await readSseStream(response, extractDelta, onToken);
+        if (!text.trim()) throw new ProviderError(`${config.label} returned an empty response.`);
+        return text;
+      }
 
       const data = (await response.json()) as ChatCompletionResponse;
       // OpenRouter can return a 200 carrying an error body.
@@ -55,6 +102,7 @@ export const openaiProvider = createProvider({
   label: 'OpenAI',
   endpoint: 'https://api.openai.com/v1/chat/completions',
   tokenField: 'max_completion_tokens',
+  effortStyle: 'openai',
 });
 
 export const openrouterProvider = createProvider({
@@ -62,8 +110,9 @@ export const openrouterProvider = createProvider({
   label: 'OpenRouter',
   endpoint: 'https://openrouter.ai/api/v1/chat/completions',
   tokenField: 'max_tokens',
+  effortStyle: 'openrouter',
   extraHeaders: {
-    'HTTP-Referer': 'https://github.com/donneff/med-knowledge-clipper',
+    'HTTP-Referer': 'https://github.com/nocluetoday/theKnowledge',
     'X-Title': 'Medical Knowledge Clipper',
   },
 });

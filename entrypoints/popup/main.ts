@@ -3,15 +3,21 @@ import type { ClipMode, PageInfo, RunUpdate } from '../../src/lib/messages';
 const titleEl = document.getElementById('page-title') as HTMLHeadingElement;
 const kindEl = document.getElementById('page-kind') as HTMLParagraphElement;
 const statusEl = document.getElementById('status') as HTMLParagraphElement;
+const previewEl = document.getElementById('preview') as HTMLPreElement;
 const clipButton = document.getElementById('clip') as HTMLButtonElement;
 const summarizeButton = document.getElementById('summarize') as HTMLButtonElement;
 const settingsButton = document.getElementById('settings') as HTMLButtonElement;
 
+/** How long to wait on the content-type sniff before assuming HTML. */
+const SNIFF_TIMEOUT_MS = 1500;
+
 let page: PageInfo | undefined;
+/** Resolves once the PDF sniff settles; awaited only if the user clicks first. */
+let kindReady: Promise<void> = Promise.resolve();
 
 settingsButton.addEventListener('click', () => browser.runtime.openOptionsPage());
-clipButton.addEventListener('click', () => start('clip'));
-summarizeButton.addEventListener('click', () => start('summarize'));
+clipButton.addEventListener('click', () => void start('clip'));
+summarizeButton.addEventListener('click', () => void start('summarize'));
 
 void init();
 
@@ -24,35 +30,56 @@ async function init(): Promise<void> {
     return;
   }
 
-  page = {
-    tabId: tab.id,
-    url: tab.url,
-    title: tab.title ?? 'Untitled',
-    kind: (await isPdf(tab.url)) ? 'pdf' : 'html',
-  };
-
+  const url = tab.url;
+  page = { tabId: tab.id, url, title: tab.title ?? 'Untitled', kind: 'html' };
   titleEl.textContent = page.title;
-  kindEl.textContent = page.kind === 'pdf' ? 'PDF document' : 'Web page';
+
+  // The buttons work immediately. Detecting a PDF can need a network round trip,
+  // and making the user wait on it before their first click was the single
+  // longest delay in the popup.
   clipButton.disabled = false;
   summarizeButton.disabled = false;
+
+  if (/\.pdf(?:[?#]|$)/i.test(url)) {
+    setKind('pdf');
+    return;
+  }
+
+  kindEl.textContent = 'Web page';
+  kindReady = sniffPdf(url).then((isPdf) => {
+    if (isPdf) setKind('pdf');
+  });
 }
 
-/** URL extension first; fall back to a HEAD content-type sniff. */
-async function isPdf(url: string): Promise<boolean> {
-  if (/\.pdf(?:[?#]|$)/i.test(url)) return true;
+function setKind(kind: PageInfo['kind']): void {
+  if (page) page.kind = kind;
+  kindEl.textContent = kind === 'pdf' ? 'PDF document' : 'Web page';
+}
+
+/** Check the content type without letting a slow origin hold up the popup. */
+async function sniffPdf(url: string): Promise<boolean> {
   try {
-    const response = await fetch(url, { method: 'HEAD' });
+    const response = await fetch(url, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(SNIFF_TIMEOUT_MS),
+    });
     return (response.headers.get('content-type') ?? '').toLowerCase().includes('application/pdf');
   } catch {
+    // Timed out, blocked, or offline — treat it as an ordinary page.
     return false;
   }
 }
 
-function start(mode: ClipMode): void {
+async function start(mode: ClipMode): Promise<void> {
   if (!page) return;
 
   setBusy(true);
   setStatus(mode === 'clip' ? 'Clipping…' : 'Starting…');
+  showPreview('');
+
+  // If the sniff has not settled yet, it is nearly done — wait for it now so the
+  // right extractor runs.
+  await kindReady;
 
   const port = browser.runtime.connect({ name: 'clipper' });
 
@@ -60,13 +87,13 @@ function start(mode: ClipMode): void {
     const update = raw as RunUpdate;
     if (update.type === 'progress') {
       setStatus(update.message);
+    } else if (update.type === 'partial') {
+      showPreview(update.text);
     } else if (update.type === 'done') {
       // With the Save As dialog the destination is the user's choice and is
       // never reported back, so only name the file.
-      setStatus(
-        update.chosen ? `Saved ${update.filename}` : `Saved to Downloads/${update.filename}`,
-        'success',
-      );
+      const where = update.chosen ? update.filename : `Downloads/${update.filename}`;
+      setStatus(`Saved to ${where} in ${update.seconds}s`, 'success');
       setBusy(false);
       port.disconnect();
     } else if (update.type === 'cancelled') {
@@ -81,6 +108,13 @@ function start(mode: ClipMode): void {
   });
 
   port.postMessage({ type: 'start', mode, page });
+}
+
+/** Show the synthesis as it streams, pinned to the newest text. */
+function showPreview(text: string): void {
+  previewEl.hidden = !text;
+  previewEl.textContent = text;
+  previewEl.scrollTop = previewEl.scrollHeight;
 }
 
 function setBusy(busy: boolean): void {

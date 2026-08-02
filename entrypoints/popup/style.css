@@ -104,6 +104,21 @@ button.primary {
   color: var(--success);
 }
 
+.preview {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.6rem;
+  max-height: 11rem;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  background: rgb(127 127 127 / 0.1);
+  border-radius: 6px;
+}
+
 footer {
   margin-top: 0.7rem;
   padding-top: 0.5rem;

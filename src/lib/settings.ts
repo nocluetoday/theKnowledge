@@ -19,6 +19,21 @@ export interface ProviderSettings {
   model: string;
 }
 
+/**
+ * How much of the extraction to actually write out.
+ *
+ * `synthesis` performs the same staged extraction but emits only the clinical
+ * synthesis. The per-claim JSON records are the bulk of the generated text and
+ * land in a collapsed block most readers never open, so skipping them is the
+ * single largest speed win available.
+ */
+export type DetailLevel = 'synthesis' | 'full';
+
+/** Reasoning budget. Providers spell this differently; see `src/lib/providers`. */
+export type Effort = 'minimal' | 'low' | 'medium' | 'high';
+
+export const EFFORT_LEVELS: Effort[] = ['minimal', 'low', 'medium', 'high'];
+
 export interface Settings {
   provider: ProviderId;
   providers: Record<ProviderId, ProviderSettings>;
@@ -33,6 +48,10 @@ export interface Settings {
    * used, which gets close to a remembered destination.
    */
   askWhereToSave: boolean;
+  detail: DetailLevel;
+  effort: Effort;
+  /** OpenRouter only: route to the fastest host serving the chosen model. */
+  preferFastestProvider: boolean;
   chunkSize: number;
   maxOutputTokens: number;
   extractionPrompt: string;
@@ -47,8 +66,13 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   subfolder: 'MedKnowledge',
   askWhereToSave: false,
+  detail: 'synthesis',
+  effort: 'low',
+  preferFastestProvider: true,
   chunkSize: 100_000,
-  maxOutputTokens: 16_000,
+  // On OpenRouter the reasoning effort is a *share* of this number, so keeping
+  // it modest bounds reasoning spend as well as output length.
+  maxOutputTokens: 8_000,
   extractionPrompt: DEFAULT_EXTRACTION_PROMPT,
 };
 

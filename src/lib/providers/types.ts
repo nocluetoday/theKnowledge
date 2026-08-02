@@ -1,8 +1,19 @@
+import type { Effort } from '../settings';
+
 export interface CompletionRequest {
   apiKey: string;
   model: string;
   prompt: string;
   maxTokens: number;
+  /** Reasoning budget. Each provider names this differently. */
+  effort: Effort;
+  /** OpenRouter only: prefer the fastest host for the model. */
+  preferFastestProvider?: boolean;
+  /**
+   * When supplied the response is streamed and this is called with each text
+   * delta. The full text is still returned when the stream completes.
+   */
+  onToken?: (text: string) => void;
   signal?: AbortSignal;
 }
 

@@ -95,7 +95,9 @@ label.checkbox {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0 0 0.1rem;
+  /* Matches the top margin of the plain labels so a checkbox following an
+     explanatory note is not flush against it. */
+  margin: 0.75rem 0 0.1rem;
   cursor: pointer;
 }
 

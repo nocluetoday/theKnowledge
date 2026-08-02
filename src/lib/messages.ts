@@ -26,6 +26,12 @@ export interface ProgressUpdate {
   message: string;
 }
 
+/** Streamed synthesis text so far, so the popup can show it being written. */
+export interface PartialUpdate {
+  type: 'partial';
+  text: string;
+}
+
 export interface DoneUpdate {
   type: 'done';
   filename: string;
@@ -35,6 +41,8 @@ export interface DoneUpdate {
    * being under Downloads.
    */
   chosen: boolean;
+  /** Wall-clock seconds from click to saved file. */
+  seconds: number;
 }
 
 /** The user dismissed the Save As dialog — expected, so not shown as an error. */
@@ -47,7 +55,7 @@ export interface ErrorUpdate {
   message: string;
 }
 
-export type RunUpdate = ProgressUpdate | DoneUpdate | CancelledUpdate | ErrorUpdate;
+export type RunUpdate = ProgressUpdate | PartialUpdate | DoneUpdate | CancelledUpdate | ErrorUpdate;
 
 /** Result returned by the content script's Readability pass. */
 export interface ArticleExtraction {

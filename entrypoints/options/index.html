@@ -28,6 +28,42 @@
       </section>
 
       <section>
+        <h2>Speed</h2>
+        <label for="detail">Detail level</label>
+        <select id="detail">
+          <option value="synthesis">Synthesis only — fastest</option>
+          <option value="full">Full extraction — slower</option>
+        </select>
+        <p class="note">
+          Both run the same staged extraction. <strong>Synthesis only</strong> writes just the
+          clinical synthesis; <strong>Full</strong> also writes the per-claim JSON records, fact set,
+          conflicts, verification queue, and copying-risk audit. Those extra sections are most of the
+          generated text, so Full takes considerably longer.
+        </p>
+
+        <label for="effort">Reasoning effort</label>
+        <select id="effort">
+          <option value="minimal">Minimal — fastest</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High — most thorough</option>
+        </select>
+        <p class="note">
+          How much the model thinks before answering. On OpenRouter this is a share of the output
+          token budget, so lower settings cut the wait directly.
+        </p>
+
+        <label class="checkbox">
+          <input id="prefer-fastest" type="checkbox" />
+          <span>Prefer the fastest provider (OpenRouter only)</span>
+        </label>
+        <p class="note">
+          Routes to whichever host is currently serving your chosen model fastest. Ignored by
+          Anthropic and OpenAI, which each have one endpoint.
+        </p>
+      </section>
+
+      <section>
         <h2>Saving</h2>
         <label class="checkbox">
           <input id="ask-where-to-save" type="checkbox" />
