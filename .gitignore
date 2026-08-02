@@ -1,0 +1,8 @@
+node_modules/
+.wxt/
+.output/
+# Copied from pdfjs-dist at build time by scripts/copy-pdf-worker.mjs
+public/pdf.worker.mjs
+stats.html
+stats-*.json
+.DS_Store

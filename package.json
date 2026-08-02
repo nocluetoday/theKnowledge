@@ -1,0 +1,32 @@
+{
+  "name": "med-knowledge-clipper",
+  "description": "Firefox extension that clips and AI-summarizes medical knowledge from web pages and PDFs into markdown notes",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "copy-pdf-worker": "node scripts/copy-pdf-worker.mjs",
+    "predev": "npm run copy-pdf-worker",
+    "dev": "wxt -b firefox",
+    "prebuild": "npm run copy-pdf-worker",
+    "build": "wxt build -b firefox",
+    "prezip": "npm run copy-pdf-worker",
+    "zip": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "test": "vitest run",
+    "postinstall": "npm run copy-pdf-worker && wxt prepare"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "pdfjs-dist": "^4.10.38",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^28.0.3",
+    "@types/turndown": "^5.0.5",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8",
+    "wxt": "^0.19.27"
+  }
+}

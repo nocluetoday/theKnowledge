@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Medical Knowledge Clipper — Settings</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Medical Knowledge Clipper</h1>
+
+      <section>
+        <h2>AI provider</h2>
+        <label for="provider">Provider used for summaries</label>
+        <select id="provider">
+          <option value="anthropic">Anthropic</option>
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
+
+        <div id="provider-fields"></div>
+
+        <p class="note">
+          API keys are stored locally in the browser's extension storage, unencrypted. Anyone with
+          access to this Firefox profile can read them.
+        </p>
+      </section>
+
+      <section>
+        <h2>Saving</h2>
+        <label for="subfolder">Downloads subfolder</label>
+        <input id="subfolder" type="text" spellcheck="false" />
+        <p class="note">
+          Notes are saved to <code>Downloads/&lt;subfolder&gt;/</code>. Firefox extensions cannot
+          write outside the Downloads folder.
+        </p>
+      </section>
+
+      <section>
+        <h2>Long documents</h2>
+        <label for="chunk-size">Characters per API call</label>
+        <input id="chunk-size" type="number" min="10000" step="10000" />
+        <p class="note">
+          Sources longer than this are split; each part is extracted separately and the results are
+          merged into one synthesis.
+        </p>
+
+        <label for="max-tokens">Maximum output tokens per call</label>
+        <input id="max-tokens" type="number" min="1000" step="1000" />
+      </section>
+
+      <section>
+        <h2>Extraction prompt</h2>
+        <textarea id="prompt" spellcheck="false" rows="18"></textarea>
+        <button id="restore" type="button" class="secondary">Restore default prompt</button>
+      </section>
+
+      <div class="bar">
+        <button id="save" type="button" class="primary">Save</button>
+        <span id="status" role="status" aria-live="polite"></span>
+      </div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
