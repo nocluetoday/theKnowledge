@@ -12,6 +12,8 @@
     "build": "wxt build -b firefox",
     "prezip": "npm run copy-pdf-worker",
     "zip": "wxt zip -b firefox",
+    "presign": "npm run build",
+    "sign": "npx --yes web-ext sign --source-dir .output/firefox-mv2 --channel unlisted",
     "compile": "tsc --noEmit",
     "test": "vitest run",
     "postinstall": "npm run copy-pdf-worker && wxt prepare"

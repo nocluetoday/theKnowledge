@@ -6,3 +6,5 @@ public/pdf.worker.mjs
 stats.html
 stats-*.json
 .DS_Store
+# Signed .xpi files produced by `npm run sign`
+web-ext-artifacts/
