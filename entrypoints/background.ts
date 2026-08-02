@@ -10,8 +10,11 @@ export default defineBackground(() => {
   browser.runtime.onConnect.addListener((port) => {
     if (port.name !== 'clipper') return;
 
+    // Deliberately not aborted when the port disconnects: a Firefox popup closes
+    // as soon as it loses focus, so cancelling on disconnect would kill a
+    // minutes-long summary the moment the user clicked the page behind it. The
+    // run finishes and saves; progress messages are dropped once nobody listens.
     const controller = new AbortController();
-    port.onDisconnect.addListener(() => controller.abort());
 
     port.onMessage.addListener(async (raw: unknown) => {
       const message = raw as { type?: string; mode: ClipMode; page: PageInfo };

@@ -1,53 +1,133 @@
 # Medical Knowledge Clipper
 
-A Firefox extension that turns the page you are looking at — a web article or a
-PDF — into a markdown note in your Downloads folder. Two modes:
+A Firefox extension that turns whatever you are reading — a journal article, a
+guideline, a PDF — into a markdown note in your Downloads folder.
 
-- **Clip full text** — strips navigation, ads, and boilerplate with Mozilla's
-  Readability and saves clean markdown. No AI, no API key, no cost.
-- **Summarize** — runs a multi-stage medical knowledge-extraction prompt through
-  Claude, GPT, or any OpenRouter model, and saves a synthesis-first note.
+It has two buttons:
 
-## Setup
+- **Clip full text** saves the article as clean markdown, with the navigation,
+  ads, cookie banners, and footer stripped out. No AI, no API key, no cost.
+- **Summarize** sends the text to Claude, GPT, or an OpenRouter model, which runs
+  a multi-stage medical knowledge-extraction prompt and returns a structured
+  synthesis rather than a paraphrase of the source.
+
+Both modes work on ordinary web pages and on PDFs displayed in the browser.
+
+---
+
+## Installing
+
+### 1. Requirements
+
+You need [Node.js](https://nodejs.org) 20 or newer, which provides the `npm`
+command used below. Everything else installs itself.
+
+### 2. Build the extension
 
 ```bash
+git clone https://github.com/nocluetoday/theKnowledge.git
+cd theKnowledge
 npm install
+npm run build
 ```
 
-Then open the extension's settings and add an API key for whichever provider you
-plan to use. Keys are stored in the browser's local extension storage,
-unencrypted — anyone with access to the Firefox profile can read them.
+That produces a loadable extension in `.output/firefox-mv2/`.
 
-## Development
+### 3. Load it into Firefox
 
-```bash
-npm run dev      # launches Firefox with the extension loaded, hot-reloading
-npm test         # unit and integration tests
-npm run compile  # typecheck
-npm run build    # production build into .output/firefox-mv2/
-npm run zip      # installable .zip
-```
+1. Open `about:debugging` in Firefox.
+2. Click **This Firefox** in the sidebar.
+3. Click **Load Temporary Add-on…**.
+4. Select `.output/firefox-mv2/manifest.json` from this project.
 
-To load a built extension manually: `about:debugging` → This Firefox → Load
-Temporary Add-on → pick `.output/firefox-mv2/manifest.json`.
+The extension is now active.
 
-## How summarizing works
+**Temporary add-ons are removed when Firefox restarts.** This is a Firefox rule
+for unsigned extensions, not a limitation of this project — you will need to
+repeat step 3 after each restart.
 
-The extraction prompt (editable in settings) runs in stages: characterize the
-source, extract atomic claims as structured JSON, quality-check them, consolidate
-conflicts, and only then write a synthesis from the extracted facts rather than
-from the source prose.
+### 4. Keeping it installed across restarts
 
-When a source is longer than the configured chunk size (default 100k characters),
-it is split on page and paragraph boundaries. Each part runs stages 1–2 to
-produce atomic records; the records are merged and a final call runs stages 3–5
-over the merged set. Splitting is transparent — one note comes out either way,
-with a `chunks:` field in the frontmatter when it happened.
+Release builds of Firefox only install extensions that Mozilla has signed. Two
+ways around that:
 
-## Note format
+- **Sign it yourself.** Register at [addons.mozilla.org](https://addons.mozilla.org/developers/),
+  create API credentials, and submit the build for *self-distribution* signing.
+  You get back a signed `.xpi` you can install permanently, and it never appears
+  in the public add-on listing. The extension already declares a stable ID
+  (`med-knowledge-clipper@donneff.dev`), which signing requires.
+- **Use a Firefox build that allows unsigned extensions** — Developer Edition,
+  Nightly, or ESR — where setting `xpinstall.signatures.required` to `false` in
+  `about:config` permits installing the unsigned `.xpi` directly.
 
-Summaries lead with what you actually want to read and tuck the audit trail at
-the bottom:
+---
+
+## Using it
+
+### Finding the button
+
+The extension has no custom icon yet, so it appears as a generic puzzle-piece
+entry in the toolbar's extensions menu. Click the puzzle-piece icon, then pin
+**Medical Knowledge Clipper** to the toolbar so it is one click away.
+
+### Before your first summary
+
+Clipping works immediately. Summarizing needs an API key:
+
+1. Click the extension, then **Settings**.
+2. Pick your provider: Anthropic, OpenAI, or OpenRouter.
+3. Paste that provider's API key and adjust the model if you want.
+4. Click **Save**.
+
+You can store keys for all three providers at once and switch between them with
+the dropdown — changing providers does not erase the other keys.
+
+### Clipping a page
+
+Open the article or PDF, click the extension, and choose a button:
+
+| Button | What you get | Cost |
+| --- | --- | --- |
+| **Clip full text** | The article verbatim as clean markdown | Free |
+| **Summarize** | A structured synthesis with the facts extracted and audited | One or more API calls |
+
+Progress appears in the popup (`Reading the page…`, `Summarizing…`, `Saving…`).
+Long documents report which part they are on. When it finishes, the popup shows
+where the file landed.
+
+You can close the popup while a summary is running — the work continues in the
+background and the note still saves.
+
+### Where notes go
+
+Notes save to `Downloads/MedKnowledge/`, named `YYYY-MM-DD <page title>.md`.
+Clipping the same page twice never overwrites the first note; Firefox adds a
+numeric suffix.
+
+Firefox extensions are not permitted to write anywhere outside Downloads, so if
+you want notes in an Obsidian vault, change the subfolder in settings and point a
+sync tool at that folder, or move them in periodically.
+
+---
+
+## Settings
+
+| Setting | What it does |
+| --- | --- |
+| **Provider** | Which service summaries are sent to |
+| **API key** and **Model** | Stored separately for each of the three providers |
+| **Downloads subfolder** | Folder under Downloads where notes are saved |
+| **Characters per API call** | How much text goes in one request before the document is split (default 100,000) |
+| **Maximum output tokens** | Ceiling on the length of each response (default 16,000) |
+| **Extraction prompt** | The full prompt, editable, with a **Restore default prompt** button |
+
+---
+
+## What a summary looks like
+
+Summaries lead with what is worth reading and keep the audit trail out of the
+way. The note opens with YAML frontmatter recording the source URL, date,
+provider, and model, so it drops straight into Obsidian:
 
 ```markdown
 ---
@@ -60,31 +140,108 @@ model: "claude-opus-5"
 ---
 # Management of Small Renal Masses
 
-## Clinical synthesis
-## Canonical fact set
-## Conflicts and uncertainties
-## Verification queue
-## Source characterization
+## Clinical synthesis          ← the actual write-up
+## Canonical fact set          ← the deduplicated claims behind it
+## Conflicts and uncertainties ← where the source contradicts itself
+## Verification queue          ← claims flagged as needing an outside check
+## Source characterization     ← domain, evidence level, source type
 
-<details><summary>Atomic knowledge records and copying-risk audit</summary>
+<details>Atomic knowledge records and copying-risk audit</details>
 ```
 
+The structured JSON records and the copying-risk audit are collapsed inside the
+`<details>` block at the bottom — present when you want them, invisible when you
+are reading.
+
 If the model returns something that cannot be split into the expected sections,
-the raw output is saved verbatim under a banner rather than discarded.
+the raw response is saved verbatim under a warning banner rather than discarded.
 
-## Notes on the implementation
+### How the extraction works
 
-- **PDFs are re-fetched, not scraped.** Firefox's built-in PDF viewer runs in a
-  privileged context that an extension cannot reach into, so the background
-  script downloads the PDF bytes again and parses them with its own bundled
-  pdf.js. Local `file://` PDFs work once you grant the extension file access in
-  `about:addons`.
-- **The pdf.js worker ships verbatim.** `scripts/copy-pdf-worker.mjs` copies
-  pdf.js's own ES-module worker into `public/`. Routing it through Vite's worker
-  pipeline instead produces a worker that dies on load, because WXT's background
-  IIFE footer leaks into every chunk of that build.
-- **Files can only go to Downloads.** Firefox extensions cannot write elsewhere,
-  so notes land in `Downloads/<subfolder>/`. Point a sync tool or your Obsidian
-  vault at that folder if you want them elsewhere.
-- **API calls happen in the background script**, which holds the host
-  permissions, so there are no CORS problems with any of the three providers.
+The prompt does not ask for a summary. It runs in stages: characterize the
+source, break it into atomic factual claims as structured records, quality-check
+each claim, consolidate duplicates and conflicts, and only then write a synthesis
+*from the extracted records* — deliberately not from the source's prose,
+organization, or examples.
+
+### Long documents
+
+Anything longer than the configured chunk size is split on page and paragraph
+boundaries. Each part is processed into atomic records, then a final call merges
+all the records and writes one synthesis over the combined set. The synthesis
+therefore reflects the whole document, not just its first section.
+
+This is automatic and produces a single note either way. When it happens, the
+frontmatter records a `chunks:` count, and the popup reports progress per part.
+
+---
+
+## Troubleshooting
+
+**"No API key set for …"** — add a key for the provider selected in settings.
+
+**"Could not download the PDF (HTTP 401/403)"** — the PDF sits behind a login
+that the download did not carry. Save the file locally and open it in Firefox,
+then clip it.
+
+**"No text could be extracted — this PDF is probably a scan."** — the PDF is
+page images with no text layer. It would need OCR before this can read it.
+
+**The note is missing part of the page** — Readability keeps the main article
+and drops everything it judges to be chrome. On pages that are not article-shaped
+(dashboards, tables, search results) the extension falls back to the whole page
+body instead.
+
+**A provider error appears in the popup** — the provider's own message is shown
+verbatim, including rate limits, billing problems, and unknown model names. If
+the model name is wrong, correct it in settings.
+
+**Nothing happens on a `about:` or `about:config` page** — Firefox blocks
+extensions from reading its internal pages. This is expected.
+
+---
+
+## Privacy and API keys
+
+**Clip mode sends nothing anywhere.** Extraction and conversion happen entirely
+in the browser.
+
+**Summarize mode sends the page text to the provider you selected**, and to no
+one else. Consider that before summarizing anything containing patient
+information — this is a general-purpose API, not a HIPAA-covered service, and no
+business associate agreement is in place by default.
+
+API keys are stored in Firefox's local extension storage, **unencrypted**.
+Anyone with access to your Firefox profile can read them. Use keys scoped to this
+purpose so you can revoke one without disrupting anything else.
+
+---
+
+## Development
+
+```bash
+npm run dev      # Firefox with the extension loaded and hot-reloading
+npm test         # unit and integration tests
+npm run compile  # typecheck
+npm run build    # production build into .output/firefox-mv2/
+npm run zip      # packaged .zip
+```
+
+Built with [WXT](https://wxt.dev) and TypeScript. Text extraction uses Mozilla's
+[Readability](https://github.com/mozilla/readability) for HTML and
+[pdf.js](https://mozilla.github.io/pdf.js/) for PDFs;
+[Turndown](https://github.com/mixmark-io/turndown) handles HTML-to-markdown.
+
+Two implementation notes for anyone reading the source:
+
+- **PDFs are downloaded a second time rather than read off the screen.**
+  Firefox's built-in PDF viewer runs in a privileged context an extension cannot
+  reach into, so the background script re-fetches the file and parses the bytes
+  with its own copy of pdf.js. Local PDFs opened as `file://` URLs are covered by
+  the extension's permissions, though that path has not been verified on a real
+  profile yet.
+- **The pdf.js worker ships verbatim from `public/`**, copied there by
+  `scripts/copy-pdf-worker.mjs`. It deliberately bypasses the bundler: WXT builds
+  the background script as an IIFE and appends a trailing global reference to
+  every chunk in that build, which leaves a bundled worker throwing
+  `ReferenceError: background is not defined` the moment pdf.js starts it.
